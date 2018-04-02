@@ -5,7 +5,7 @@ var express = require('express'),
     
 Object.assign=require('object-assign')
 
-app.use(express.static(__dirname + '/public'));
+app.use(express.static('public'));
 app.engine('html', require('ejs').renderFile);
 app.use(morgan('combined'))
 
