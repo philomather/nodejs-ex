@@ -63,6 +63,9 @@ window.requestAnimationFrame = (function(){
         var cx              = canvas.width * 0.5,
             cy              = canvas.height * 0.5;
 
+        grad = context.createRadialGradient(cx, cy, 0, cx, cy, Math.sqrt(cx * cx + cy * cy));
+        grad.addColorStop(0, 'rgba(0, 0, 0, 0)');
+        grad.addColorStop(1, 'rgba(0, 0, 0, 0.4)');
     }
 
     function mouseMove(e) {
@@ -221,6 +224,8 @@ window.requestAnimationFrame = (function(){
 
         context.save();
         context.fillStyle = BACKGROUND_COLOR;
+        context.fillRect(0, 0, screenWidth, screenHeight);
+        context.fillStyle = grad;
         context.fillRect(0, 0, screenWidth, screenHeight);
         context.restore();
         context.fillStyle = 'black';

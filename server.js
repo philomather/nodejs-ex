@@ -2,7 +2,7 @@
 //  OpenShift sample Node application
 var express = require('express'),
     io      = require('socket.io'),
-    http    = require('http');
+    http    = require('http'),
     mongojs = require('mongojs');
 
 /**
@@ -87,6 +87,7 @@ var SampleApp = function() {
 
         var server_code = require('./server_code.js');
         var objects = require('./objects.js');
+        var mouse = new objects.Vector;
         var head;
         self.client_list = [];
 
@@ -108,9 +109,7 @@ var SampleApp = function() {
                 head = client.userid
                 // start new project
                 self.project = server_code.Newproject(client.userid);  //project is 
-                client.emit("message", self.project.nodes);
-
-                // Database stuff
+                
                 var shelf = self.db.collection('shelf');
                 self.myDocs = shelf.find().forEach(function(err, doc) {
                     if(doc != null){
@@ -124,7 +123,7 @@ var SampleApp = function() {
                 // add to client list and send id
             self.client_list[self.client_list.length] = client.userid;
             client.emit('newid', client.userid);
-            
+
             client.on('mouseaction', function (data) {
                 
                 if(data.dragging){
@@ -140,6 +139,7 @@ var SampleApp = function() {
                     client.broadcast.emit('moving', data);
                 }
             });
+
             client.emit('message', self.didconnect);
 
             client.on('load_data', function() {
