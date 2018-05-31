@@ -12,14 +12,12 @@ server_code.fluid_list = 'fluid data!';
 var vector = new objects.Vector();
 server_code.vector = [vector.x, vector.y];0
 
-server_code.afunc = function(data) {
-	data.x = data.x + 50;
-	data.y = data.y + 50;
-	return data;
-}
 
+// When called to create a new project, we make the client the head and start a list of players
+// At the same time we create a Project object called "project.core" using the Project function
+// Then we run the Project.start() function to arrange all the details ready to sent to client
 server_code.Newproject = function(client){
-	var project = {
+	var projectLive = {
 		//id: 
 		head: client,  // socket.userid
 		player_client: null,
@@ -28,76 +26,41 @@ server_code.Newproject = function(client){
 	};
 
 	// create new variable called project, project.core is a new project object
-	project.core = new server_code.Project(project);
+	project.core = new server_code.Project(projectLive);
 	project.core.start(DATA);
-	return project;
+	return project.core;
 }
 
 // PROJECT OBJECT **
 
 server_code.Project = function(instance){
 	this.instance = instance;
+	this.total = 0;
 
 	// Configs
 	this.FLOW_RATE 			= 100;
 
 	// Vars
 	this.variableA = 1;
-	this.dragging = false;
-	this.mouse = new objects.Vector();
 	this.nodes 	= [];
 	this.routes = [];
 	this.coordinates = [];
-	this.view = [];
 }
 
 		    // Event Listeners
 server_code.Project.prototype = {
 	    
-    move: function(d) {
-        this.mouse.x = d.x;
-        this.mouse.y = d.y;
 
-        // check for clicks, react
-        if(d.dragging && !this.dragging){
-        	this.dragging = true;
-        	this.down(d)
-        	return 'mouse down';
-        } else if(!d.dragging && this.dragging) {
-        	this.dragging = false;
-        	this.up(d)
-        	return 'mouse up';
-        } else return [d.x, d.y]
-		
-		/*	
-		for (i = 0; i < nodes.length; i++) {
-			var n = nodes[i];
-			if ((!hit && n.hitTest(mouse)) || n.dragging) {
-				n.isMouseOver = hit = true; //highlight on mouseover 
-				hover = i;
-			}
-			else {
-				n.isMouseOver = false;
-			}
-		}*/
-    },
-
-    down: function(d) {
-    	// check for clicks on nodes and highlight
-
-	},
-
-    up: function(d) {
-    	// stop dragging if dragging
-    },
-
+    // add or load nodes
     start: function(input) {
 		
 		this.input 	= input;
 		
-		// fresh input
+		// check for new input, create a list of node objects with newInput and addNode
 		if (this.input != null) this.newInput(this.input);
 		
+		// setup the correct arrangement by modifying each node object 
+		//in the node list according to the data in the input list
 		for (i = 0; i < this.nodes.length; i++) {
 			var n = this.nodes[i];
 			var p = this.input[i];
@@ -111,10 +74,6 @@ server_code.Project.prototype = {
 			this.coordinates.push([
 				p[0], p[1], p[2]
 			]);
-
-			this.view.push([
-				p[0], p[1], 'red', n.previous.x, n.previous.y, 'white'
-			])
 		}
 	},
 
@@ -133,7 +92,8 @@ server_code.Project.prototype = {
     },
 
     send: function() {
-    	// send latest node coordinates
+    	// send nodes to the client!
+
 
     }
 }
