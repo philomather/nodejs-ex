@@ -1,110 +1,179 @@
+#!/bin/env node
 //  OpenShift sample Node application
 var express = require('express'),
-    app     = express(),
-    morgan  = require('morgan');
-    
-Object.assign=require('object-assign')
+    io      = require('socket.io'),
+    http    = require('http'),
+    mongojs = require('mongojs');
 
-app.use(express.static('views'));
-app.engine('html', require('ejs').renderFile);
-app.use(morgan('combined'))
+/**
+ *  Define the sample application.
+ */
+var SampleApp = function() {
+
+    //  Scope.
+    var self = this;
+
+    self.setupVariables = function() {
+        //  Set the environment variables we need.
+        self.ipaddress = process.env.OPENSHIFT_NODEJS_IP;
+        self.port      = process.env.OPENSHIFT_NODEJS_PORT || 8080;
+        self.didconnect = false;
+        // MONGODB STUFF
+        if(process.env.OPENSHIFT_MONGODB_DB_PASSWORD){
+            self.connection_string = process.env.OPENSHIFT_MONGODB_DB_USERNAME + ':' + 
+            process.env.OPENSHIFT_MONGODB_DB_PASSWORD + '@' +
+            process.env.OPENSHIFT_MONGODB_DB_HOST + ':' +
+            process.env.OPENSHIFT_MONGODB_DB_PORT + '/' +
+            process.env.OPENSHIFT_APP_NAME;
+            self.db = mongojs(self.connection_string, ['shelf']);
+            self.didconnect = true;
+        }
+        if (typeof self.ipaddress === "undefined") {
+            //  Log errors on OpenShift but continue w/ 127.0.0.1 - this
+            //  allows us to run/test the app locally.
+            console.warn('No OPENSHIFT_NODEJS_IP var, using 127.0.0.1');
+            self.ipaddress = "127.0.0.1";
+        };
+    };
+
+    self.terminator = function(sig){
+        if (typeof sig === "string") {
+           console.log('%s: Received %s - terminating sample app ...',
+                       Date(Date.now()), sig);
+           process.exit(1);
+        }
+        console.log('%s: Node server stopped.', Date(Date.now()) );
+    };
+
+    self.setupTerminationHandlers = function(){
+        //  Process on exit and signals.
+        process.on('exit', function() { self.terminator(); });
+
+        // Removed 'SIGPIPE' from the list - bugz 852598.
+        ['SIGHUP', 'SIGINT', 'SIGQUIT', 'SIGILL', 'SIGTRAP', 'SIGABRT',
+         'SIGBUS', 'SIGFPE', 'SIGUSR1', 'SIGSEGV', 'SIGUSR2', 'SIGTERM'
+        ].forEach(function(element, index, array) {
+            process.on(element, function() { self.terminator(element); });
+        });
+    };
+
+    self.initialize = function() {
+        self.setupVariables();
+        self.setupTerminationHandlers();
+    };
+
+    self.start = function() {
+
+        self.app     = express(),
+        self.server  = http.createServer(self.app);
+
+        //deploy
+        self.server.listen(self.port, self.ipaddress, function() {
+            console.log('%s: Node server started on %s:%d ...',
+                        Date(Date.now() ), self.ipaddress, self.port);
+        });
+
+        //local
+        //self.server.listen(8080);
+
+        self.app.get('/', function (req, res) {
+            res.sendfile('/index.html', {root:__dirname });
+        });
+
+        self.app.get('/*', function(req, res, next) {
+            self.file = req.params[0];
+            res.sendfile(__dirname + '/assets/' + self.file);
+        });
+
+        var server_code = require('./server_code.js');
+        var objects = require('./objects.js');
+        var mouse = new objects.Vector;
+        var head;
+        self.client_list = [];
 
 
-var port = process.env.PORT || process.env.OPENSHIFT_NODEJS_PORT || 8080,
-    ip   = process.env.IP   || process.env.OPENSHIFT_NODEJS_IP || '0.0.0.0',
-    mongoURL = process.env.OPENSHIFT_MONGODB_DB_URL || process.env.MONGO_URL,
-    mongoURLLabel = "";
+        self.sio     = io.listen(self.server);
 
-if (mongoURL == null && process.env.DATABASE_SERVICE_NAME) {
-  var mongoServiceName = process.env.DATABASE_SERVICE_NAME.toUpperCase(),
-      mongoHost = process.env[mongoServiceName + '_SERVICE_HOST'],
-      mongoPort = process.env[mongoServiceName + '_SERVICE_PORT'],
-      mongoDatabase = process.env[mongoServiceName + '_DATABASE'],
-      mongoPassword = process.env[mongoServiceName + '_PASSWORD']
-      mongoUser = process.env[mongoServiceName + '_USER'];
+        self.sio.configure(function (){
+            self.sio.set('log level', 0);
+            self.sio.set('authorization', function(handshakeData, callback) {
+                callback(null, true);
+            });
+        });
 
-  if (mongoHost && mongoPort && mongoDatabase) {
-    mongoURLLabel = mongoURL = 'mongodb://';
-    if (mongoUser && mongoPassword) {
-      mongoURL += mongoUser + ':' + mongoPassword + '@';
-    }
-    // Provide UI label that excludes user id and pw
-    mongoURLLabel += mongoHost + ':' + mongoPort + '/' + mongoDatabase;
-    mongoURL += mongoHost + ':' +  mongoPort + '/' + mongoDatabase;
+        self.sio.sockets.on('connection', function (client) {
 
-  }
-}
-var db = null,
-    dbDetails = new Object();
+            client.userid  = Math.round((new Date).getTime())
+        
+            if(!self.client_list.length){ 
+                head = client.userid
+                // start new project
+                self.project = server_code.Newproject(client.userid);  //project is 
+                
+                var shelf = self.db.collection('shelf');
+                self.myDocs = shelf.find().forEach(function(err, doc) {
+                    if(doc != null){
+                        client.emit('message', doc.value);
+                        self.project.total = doc.value;
+                        client.emit('totalled', self.project.total);
+                    }
+                });       
+            };
 
-var initDb = function(callback) {
-  if (mongoURL == null) return;
+                // add to client list and send id
+            self.client_list[self.client_list.length] = client.userid;
+            client.emit('newid', client.userid);
 
-  var mongodb = require('mongodb');
-  if (mongodb == null) return;
+            client.on('mouseaction', function (data) {
+                
+                if(data.dragging){
+                    self.project.total += data.x;
+                    client.emit('totalled', self.project.total);
+                }
+                // This line sends the event (broadcasts it)
+                // to everyone except the originating client.
+                if(head === client.userid) {
+                    // differentiate head from other clients
+                    client.broadcast.emit('moving', data);
+                } else {
+                    client.broadcast.emit('moving', data);
+                }
+            });
 
-  mongodb.connect(mongoURL, function(err, conn) {
-    if (err) {
-      callback(err);
-      return;
-    }
+            client.emit('message', self.didconnect);
 
-    db = conn;
-    dbDetails.databaseName = db.databaseName;
-    dbDetails.url = mongoURLLabel;
-    dbDetails.type = 'MongoDB';
+            client.on('load_data', function() {
 
-    console.log('Connected to MongoDB at: %s', mongoURL);
-  });
-};
+                //self.myDocs = shelf.findAndModify({query:{name:"count"},update:{ $set: {value: project.total}}})
+            })
 
-app.get('/', function (req, res) {
-  // try to initialize the db on every request if it's not already
-  // initialized.
-  if (!db) {
-    initDb(function(err){});
-  }
-  if (db) {
-    var col = db.collection('counts');
-    // Create a document with request IP and current time of request
-    col.insert({ip: req.ip, date: Date.now()});
-    col.count(function(err, count){
-      if (err) {
-        console.log('Error running count. Message:\n'+err);
-      }
-      res.render('index.html', { pageCountMessage : count, dbInfo: dbDetails });
-    });
-  } else {
-    res.render('index.html', { pageCountMessage : null});
-  }
-});
+            client.on('disconnect', function(){
 
-app.get('/pagecount', function (req, res) {
-  // try to initialize the db on every request if it's not already
-  // initialized.
-  if (!db) {
-    initDb(function(err){});
-  }
-  if (db) {
-    db.collection('counts').count(function(err, count ){
-      res.send('{ pageCount: ' + count + '}');
-    });
-  } else {
-    res.send('{ pageCount: -1 }');
-  }
-});
+                if(head === client.userid){
+                    var killhead = true
 
-// error handling
-app.use(function(err, req, res, next){
-  console.error(err.stack);
-  res.status(500).send('Something bad happened!');
-});
+                    var shelf = self.db.collection('shelf');
+                    shelf.update({name:"count"},{$set: {value: self.project.total}});
 
-initDb(function(err){
-  console.log('Error connecting to Mongo. Message:\n'+err);
-});
+                } else {
+                    var killhead = false
+                };
 
-app.listen(port, ip);
-console.log('Server running on http://%s:%s', ip, port);
+                self.index = self.client_list.indexOf(client.userid);
+                if (self.index > -1){
+                    self.client_list.splice(self.index, 1)
+                };
 
-module.exports = app ;
+                if(killhead){
+                     head = self.client_list[0] || null;
+
+                };
+            });
+        });
+    };
+};   
+
+var zapp = new SampleApp();
+zapp.initialize();
+zapp.start();
+
